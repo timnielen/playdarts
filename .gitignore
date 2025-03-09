@@ -25,6 +25,8 @@ dataset/
 *.png
 *.jpg
 *.jpeg
+*.ARW
+*.csv
 *.gif
 *.bmp
 *.tiff
@@ -32,6 +34,8 @@ dataset/
 *.ico
 *.svg
 *.raw
+*.stl
+*.obj
 
 # Model checkpoints and weights
 *.h5
