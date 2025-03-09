@@ -1,0 +1,73 @@
+# General Python files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Virtual environment
+env/
+venv/
+ENV/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Data files (add more specific image or data file types if needed)
+data/
+dataset/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp
+*.ico
+*.svg
+*.raw
+
+# Model checkpoints and weights
+*.h5
+*.pkl
+*.ckpt
+*.pth
+*.pt
+
+# Logs and temporary files
+logs/
+*.log
+*.out
+*.err
+
+# Temporary and system files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+Dockerfile.*
+
+# TensorFlow/Keras model saves
+model/
+
+# Pytorch Lightning logs
+lightning_logs/
+
+# Miscellaneous
+*.zip
+*.tar.gz
+*.tar
+*.rar
+*.7z
+
+# Ignore configuration or secret files
+config.yaml
+config.json
+secrets.json
