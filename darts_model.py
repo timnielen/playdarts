@@ -5,10 +5,12 @@ import torch.nn.functional as F
 from torchvision.models._utils import IntermediateLayerGetter
 import math
 from scipy.optimize import linear_sum_assignment
+from score import get_score, fields
 
 
 COST_DARTS = 5
 COST_CLASS = 1
+NUM_DART_QUERIES = 3
 
 class MLP(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
@@ -116,7 +118,7 @@ class PositionEmbeddingSine(nn.Module):
         return pos
 
 class CNNTransformer(nn.Module):
-    def __init__(self, d=256, num_dart_queries=3, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=2048):
+    def __init__(self, d, num_dart_queries=NUM_DART_QUERIES, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=2048):
         super().__init__()
         name="resnet34"
         resnet = getattr(models, name)(
@@ -162,6 +164,7 @@ class CNNTransformer(nn.Module):
         num_layers = 3
         output_dim = 2
         self.pos_embed = MLP(d, dim_feedforward, output_dim, num_layers)
+        # self.field_embed = MLP(d, dim_feedforward, len(fields), num_layers)
 
     def forward(self, x):
         B, C, H, W = x.shape  # Input: (B, 3, H, W)
@@ -241,8 +244,8 @@ def loss_labels(outputs, indices):
         target_classes[idx] = 1
         
         class_weights = torch.ones(2, device=src_logits.device)
-        # class_weights[0] = 3/1
-        # class_weights[1] = 3/2 
+        class_weights[0] = NUM_DART_QUERIES/(NUM_DART_QUERIES-1.5)
+        class_weights[1] = NUM_DART_QUERIES/1.5
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, class_weights)
 
         return loss_ce
@@ -319,19 +322,21 @@ class DomainDiscriminator(nn.Module):
         self.grl = GradientReversalLayer(alpha=1.0)
         
         # Convolutional layers to process the feature maps
-        self.conv1 = nn.Conv2d(input_channels, 512, kernel_size=3, stride=2, padding=1)  # 256 -> 512 feature maps
+        self.conv1 = nn.Conv2d(input_channels, 512, kernel_size=3, stride=2, padding=1)  # input_channels -> 512 feature maps
         self.conv2 = nn.Conv2d(512, 512, kernel_size=3, stride=2, padding=1)  
         self.conv3 = nn.Conv2d(512, 1024, kernel_size=3, stride=2, padding=1)  
+        self.conv4 = nn.Conv2d(1024, 2048, kernel_size=3, stride=2, padding=1)  
         
         # Batch normalization to stabilize training
         self.bn1 = nn.BatchNorm2d(512)
         self.bn2 = nn.BatchNorm2d(512)
         self.bn3 = nn.BatchNorm2d(1024)
+        self.bn4 = nn.BatchNorm2d(2048)
         
         # Fully connected layers after flattening
-        self.fc1 = nn.Linear(1024, hidden_dim)  # Flattened size after conv layers
+        self.fc1 = nn.Linear(2048, hidden_dim)  # Flattened size after conv layers
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)  
-        self.fc3 = nn.Linear(hidden_dim, output_dim)  # Output: single logit for binary classification
+        self.fc3 = nn.Linear(hidden_dim, output_dim)
         
         # Activation function
         self.relu = nn.ReLU()
@@ -344,6 +349,7 @@ class DomainDiscriminator(nn.Module):
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.relu(self.bn2(self.conv2(x)))
         x = self.relu(self.bn3(self.conv3(x)))
+        x = self.relu(self.bn4(self.conv4(x)))
         
         # Flatten the output from convolutional layers
         x = x.view(x.size(0), -1)  # Flatten the tensor (batch_size, 2048)

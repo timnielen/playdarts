@@ -75,3 +75,7 @@ lightning_logs/
 config.yaml
 config.json
 secrets.json
+
+
+3D/scene
+backup
