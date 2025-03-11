@@ -3,6 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import os
 import torch
 import cv2
+from score import get_score, fields
 
 class SyntheticDataset(Dataset):
     def __init__(self, root_dir, labels_filename, transform=None):
@@ -43,8 +44,8 @@ class SyntheticDataset(Dataset):
             
 
         xy = torch.tensor(self.labels.iloc[idx]['xy'], dtype=torch.float32)
-        targets = {"corners": xy[:4], "darts": xy[4:]}
-        
+        points, sectors = get_score(xy[:4], xy[4:])
+        targets = {"corners": xy[:4], "darts": xy[4:], "points": torch.from_numpy(points).long(), "fields": torch.from_numpy(sectors).long()}
         return image, targets
     
     @staticmethod
@@ -72,25 +73,18 @@ class RealWorldDataset(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         
-        df_unlabeled = pd.read_csv(labels_filename) 
-        # Step 1: Calculate the occurrence of each value in 'filename'
-        filename_counts = df_unlabeled['filename'].value_counts()
-
-        # Step 2: Identify filenames that occur exactly once
-        unique_filenames = filename_counts[filename_counts == 1].index
-
-        # Step 3: Filter the DataFrame to include only rows with unique filenames
-        self.filenames = df_unlabeled[df_unlabeled['filename'].isin(unique_filenames)]
+        self.df = pd.read_csv(labels_filename) 
 
     def __len__(self):
-        return len(self.filenames)
+        return len(self.df)
 
     def __getitem__(self, idx):
-        filename = self.filenames.iloc[idx]['filename']
+        dir = self.df.iloc[idx]['img_folder']
+        name = self.df.iloc[idx]['img_name']
         try: 
-            img_path = os.path.join(self.root_dir, filename)
+            img_path = os.path.join(self.root_dir, dir, name)
         except:
-            print(self.root_dir, filename)
+            print(self.root_dir, dir, name)
             print(idx, self.filenames.iloc[idx])
         image = cv2.imread(img_path, cv2.IMREAD_COLOR_RGB)
         
