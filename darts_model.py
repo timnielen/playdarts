@@ -11,8 +11,8 @@ from score import get_score, fields
 
 COST_DARTS = 5
 COST_CLASS = 1
-NUM_DART_QUERIES = 36
-
+NUM_QUERIES = 40
+NUM_LABELS = 4 + len(fields) + 1 # 4 corners + 63 fields + 1 "no object" class
 class MLP(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
 
@@ -104,7 +104,7 @@ class PositionEmbeddingSine(nn.Module):
         return pos
 
 class CNNTransformer(nn.Module):
-    def __init__(self, d, num_dart_queries=NUM_DART_QUERIES, num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=2048):
+    def __init__(self, d, num_queries=NUM_QUERIES, num_encoder_layers=0, num_decoder_layers=6, dim_feedforward=2048):
         super().__init__()
         name="resnet50"
         resnet = getattr(models, name)(
@@ -143,14 +143,20 @@ class CNNTransformer(nn.Module):
         self.positional_encoding = PositionEmbeddingSine(N_steps, normalize=True)
 
         # Learnable queries (num_queries x d)
-        self.queries = nn.Embedding(num_dart_queries+4, d)
+        self.pos_queries = nn.Embedding(num_queries, d)
 
         # Final linear layer (shared across all queries)
         # self.class_embed = nn.Linear(d, 2)
         num_layers = 3
-        output_dim = len(fields)+1
+        output_dim = NUM_LABELS
         self.field_embed = MLP(d, dim_feedforward, output_dim, num_layers)
         self.pos_embed = MLP(d, dim_feedforward, 2, num_layers)
+        # self.conv1 = nn.Conv2d(d,2*d, kernel_size=5, stride=3, padding=2)
+        # self.bn1 = nn.BatchNorm2d(2*d)
+        # self.conv2 = nn.Conv2d(2*d,4*d, kernel_size=5, stride=3, padding=2)
+        # self.bn2 = nn.BatchNorm2d(4*d)
+        # self.relu = nn.ReLU()
+        self.num_darts_embed = MLP(d*100, dim_feedforward, 4, num_layers)
 
     def forward(self, x):
         B, C, H, W = x.shape  # Input: (B, 3, H, W)
@@ -161,6 +167,8 @@ class CNNTransformer(nn.Module):
         x = self.conv1x1(x)   # Shape: (B, d, H/32, W/32)
         extracted_features = x.clone()
         
+        num_darts = self.num_darts_embed(x.flatten(1))
+        
         pos = self.positional_encoding(x)
 
         # Transformer 
@@ -168,22 +176,20 @@ class CNNTransformer(nn.Module):
         # flatten NxCxHxW to HWxNxC
         src = x.flatten(2).permute(2, 0, 1)
         pos_embed = pos.flatten(2).permute(2, 0, 1)
-        query_embed = self.queries.weight.unsqueeze(1).repeat(1, B, 1)
+        query_embed = self.pos_queries.weight.unsqueeze(1).repeat(1, B, 1)
 
         tgt = torch.zeros_like(query_embed)
         hs = self.transformer.decoder(tgt, src, memory_key_padding_mask=None,
                           pos=pos_embed, query_pos=query_embed)
         x = hs.transpose(1, 2)
-    
+        out_queries = x
     
         # x, memory = self.transformer(x, None, self.queries.weight, pos) # Shape (num_decoder_layers, B, num_dart_queries, d)
-        logits = self.field_embed(x[:, :, 4:]) # Shape (num_decoder_layers, B, 3, len(fields)+1)
+        logits = self.field_embed(x) # Shape (num_decoder_layers, B, NUM_QUERIES, NUM_LABELS)
         
-        pred_point = self.pos_embed(x).sigmoid() # Shape (num_decoder_layers, B, num_dart_queries, 2)
+        pred_point = self.pos_embed(x).sigmoid() # Shape (num_decoder_layers, B, NUM_QUERIES, 2)
         
-        corners = pred_point[:, :, :4]
-        darts = pred_point[:, :, 4:]
-        outputs = {"corners": corners, "darts": darts, "logits": logits, "extracted_features": extracted_features}
+        outputs = {"points": pred_point, "logits": logits, "extracted_features": extracted_features, "logits_num_darts": num_darts, "out_queries": out_queries}
         return outputs
 
     
@@ -194,19 +200,19 @@ def _get_src_permutation_idx(indices):
         src_idx = torch.cat([src for (src, _) in indices])
         return batch_idx, src_idx
 
-def loss_corners(outputs, targets, decoder_layer):
-    assert 'corners' in outputs
-    src_corners = outputs["corners"][decoder_layer].reshape(-1, 2)
-    tgt_corners = torch.cat([t["corners"] for t in targets])
-    assert src_corners.shape == tgt_corners.shape
-    loss_corners = F.l1_loss(src_corners, tgt_corners)
-    return loss_corners
+# def loss_corners(outputs, targets, decoder_layer):
+#     assert 'corners' in outputs
+#     src_corners = outputs["corners"][decoder_layer].reshape(-1, 2)
+#     tgt_corners = torch.cat([t["corners"] for t in targets])
+#     assert src_corners.shape == tgt_corners.shape
+#     loss_corners = F.l1_loss(src_corners, tgt_corners)
+#     return loss_corners
 
-def loss_darts(outputs, targets, indices, decoder_layer):
-        assert 'darts' in outputs
+def loss_points(outputs, targets, indices, decoder_layer):
+        assert 'points' in outputs
         idx = _get_src_permutation_idx(indices)
-        pred_darts = outputs['darts'][decoder_layer][idx]
-        target_darts = torch.cat([t['darts'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        pred_darts = outputs['points'][decoder_layer][idx]
+        target_darts = torch.cat([t['points'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
         loss_darts = F.l1_loss(pred_darts, target_darts)
         return loss_darts
@@ -218,15 +224,17 @@ def loss_labels(outputs, targets, indices, decoder_layer):
         #create labels for darts, i.e. those outputs that have been matched to a dart get class 1 else 0
         idx = _get_src_permutation_idx(indices)
         
-        target_classes_o = torch.cat([t["fields"][J] for t, (_, J) in zip(targets, indices)])
-        target_classes = torch.full(src_logits.shape[:2], len(fields),
-                                    dtype=torch.int64, device=src_logits.device)
+        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        target_classes = torch.full(src_logits.shape[:2], NUM_LABELS-1,
+                                    dtype=torch.int64, device=src_logits.device) #default value "no object"
         target_classes[idx] = target_classes_o
         
-        class_weights = torch.ones(len(fields)+1, device=src_logits.device)
+        class_weights = torch.ones(NUM_LABELS, device=src_logits.device)
         # class_weights[:-1] *= len(fields)
-        class_weights[-1] = (NUM_DART_QUERIES-1.5)/NUM_DART_QUERIES
-        class_weights[:-1] = (1-class_weights[-1])
+        
+        class_weights[4:-1] = 1.5/NUM_QUERIES
+        class_weights[:4] = 4/NUM_QUERIES
+        class_weights[-1] = (NUM_QUERIES-1.5-4)/NUM_QUERIES
         class_weights = 1/class_weights
         # print(class_weights[0], class_weights[-1])
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, class_weights)
@@ -240,11 +248,11 @@ def match(outputs, targets, decoder_layer):
         Params:
             outputs: This is a dict that contains at least these entries:
                  "logits": Tensor of dim [num_decoder_layers, batch_size, num_queries, 2] with the classification probabilities
-                 "darts": Tensor of dim [num_decoder_layers, batch_size, num_queries, 2] with the predicted dart coordinates
+                 "points": Tensor of dim [num_decoder_layers, batch_size, num_queries, 2] with the predicted point coordinates
 
             targets: This is a list of targets (len(targets) = batch_size), where each target is a dict containing:
-                 "darts": Tensor of dim [num_target_boxes, 2] containing the target dart coordinates
-                 "field": Tensor of dim [num_target_boxes] containing the target dart fields
+                 "points": Tensor of dim [num_target_boxes, 2] containing the target point coordinates
+                 "labels": Tensor of dim [num_target_boxes] containing the target point labels
 
         Returns:
             A list of size batch_size, containing tuples of (index_i, index_j) where:
@@ -256,12 +264,12 @@ def match(outputs, targets, decoder_layer):
         bs, num_queries = outputs["logits"][decoder_layer].shape[:2]
 
         # We flatten to compute the cost matrices in a batch
-        out_prob = outputs["logits"][decoder_layer].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes(63)]
-        out_darts = outputs["darts"][decoder_layer].flatten(0, 1)  # [batch_size * num_queries, 2]
+        out_prob = outputs["logits"][decoder_layer].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, NUM_CLASSES]
+        out_points = outputs["points"][decoder_layer].flatten(0, 1)  # [batch_size * num_queries, 2]
         
         # Also concat the target labels and boxes
-        tgt_ids = torch.cat([v["fields"] for v in targets])
-        tgt_darts = torch.cat([v["darts"] for v in targets])
+        tgt_ids = torch.cat([v["labels"] for v in targets])
+        tgt_points = torch.cat([v["points"] for v in targets])
 
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - proba[target class].
@@ -269,12 +277,12 @@ def match(outputs, targets, decoder_layer):
         cost_class = -out_prob[:, tgt_ids]
 
         # Compute the L1 cost between boxes
-        cost_bbox = torch.cdist(out_darts, tgt_darts, p=1)
+        cost_bbox = torch.cdist(out_points, tgt_points, p=1)
         # Final cost matrix
         C = COST_DARTS * cost_bbox + COST_CLASS * cost_class
         C = C.view(bs, num_queries, -1).cpu()
 
-        sizes = [len(v["darts"]) for v in targets]
+        sizes = [len(v["points"]) for v in targets]
         try:
             indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
         except:
@@ -319,14 +327,15 @@ class DomainDiscriminator(nn.Module):
         self.bn4 = nn.BatchNorm2d(1024)
         
         # Fully connected layers after flattening
-        self.fc1 = nn.Linear(1024, output_dim)  # Flattened size after conv layers
+        self.fc1 = nn.Linear(1024 + NUM_QUERIES * NUM_LABELS, output_dim)  # Flattened size after conv layers
         
         # Activation function
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.5)
     
-    def forward(self, x):
+    def forward(self, x, labels):
         x = self.grl(x)
+        labels = labels.flatten(1)
         
         # Pass through convolutional layers with batch normalization and ReLU activation
         x = self.relu(self.bn1(self.conv1(x)))
@@ -335,12 +344,9 @@ class DomainDiscriminator(nn.Module):
         x = self.relu(self.bn4(self.conv4(x)))
         
         # Flatten the output from convolutional layers
-        x = x.view(x.size(0), -1)  # Flatten the tensor (batch_size, 2048)
-        # Fully connected layers
-        # x = self.relu(self.fc1(x))
-        # x = self.dropout(x)
-        # x = self.relu(self.fc2(x))
-        # x = self.dropout(x)
+        x = x.view(x.size(0), -1)  # Flatten the tensor (batch_size, 1024)
+        x = torch.cat((x, labels), dim=1)
+        
         x = self.fc1(x)  # Output layer
         
         return x

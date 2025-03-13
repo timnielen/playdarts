@@ -4,6 +4,9 @@ import os
 import torch
 import cv2
 from score import get_score, fields
+import torchvision.transforms.functional as TF
+from torchvision import transforms
+import random
 
 class SyntheticDataset(Dataset):
     def __init__(self, root_dir, labels_filename, transform=None):
@@ -41,11 +44,28 @@ class SyntheticDataset(Dataset):
         
         if self.transform:
             image = self.transform(image)
+        else: 
+            image = transforms.ToTensor()(image)
             
-
         xy = torch.tensor(self.labels.iloc[idx]['xy'], dtype=torch.float32)
+            
+        # 1. Random Rotation
+        angle = random.uniform(-10, 10)  # Max 15-degree rotation
+        image = TF.rotate(image, angle)
+
+        # Rotate dart positions around the center of the image
+        angle_rad = torch.deg2rad(torch.tensor(angle))
+        center = torch.tensor([0.5, 0.5])
+
+        R = torch.tensor([[torch.cos(-angle_rad), -torch.sin(-angle_rad)],
+                            [torch.sin(-angle_rad),  torch.cos(-angle_rad)]])
+
+        transformed_xy = torch.mm(xy - center, R.T) + center  # Apply rotation
+        
         points, sectors = get_score(xy[:4], xy[4:])
-        targets = {"corners": xy[:4], "darts": xy[4:], "points": torch.from_numpy(points).long(), "fields": torch.from_numpy(sectors).long()}
+        
+        labels = torch.cat((torch.arange(4, dtype=torch.long), torch.from_numpy(sectors).long() + 4))
+        targets = {"points": transformed_xy, "labels": labels, "score": torch.from_numpy(points).int()}
         return image, targets
     
     @staticmethod

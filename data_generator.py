@@ -4,20 +4,23 @@ inner_bull_radius = 14 / 2
 outer_bull_radius = 33 / 2
 second_ring_radius = 107
 ring_width = 10
-fields = [13,4,18,1,20,5,12,9,14,11,8,16,7,19,3,17,2,15,10,6, 26,  8, 36,  2, 40, 10, 24, 18, 28, 22, 16, 32, 14, 38,  6, 34,  4,
-       30, 20, 12, 39, 12, 54,  3, 60, 15, 36, 27, 42, 33, 24, 48, 21, 57,  9, 51,  6,
-       45, 30, 18, 25, 50, 0]
+fields = [13,  4, 18,  1, 20,  5, 12,  9, 14, 11,  8, 16,  7, 19,  3, 17,  2, 15, 10,  6, 
+          39, 12, 54,  3, 60, 15, 36, 27, 42, 33, 24, 48, 21, 57,  9, 51,  6, 45, 30, 18, 
+          26,  8, 36,  2, 40, 10, 24, 18, 28, 22, 16, 32, 14, 38,  6, 34,  4, 30, 20, 12, 
+          25, 50,  0]
 
 class Player:
-    def __init__(self, kind=2, accuracy=0.5):
+    def __init__(self, kind=2, accuracy=0.5, min_field=0, max_field=len(fields)-1):
         self.kind = kind
         self.accuracy =  accuracy
+        self.min_field = min_field
+        self.max_field = max_field
     def generate_dart_locations(self, num_darts):
         #initialize result
         darts = np.zeros((num_darts, 2))
         
         # generate target fields depending on the kind of player (exclude the 0 field )
-        target_fields = np.random.randint(len(fields)-1, size=num_darts)
+        target_fields = np.random.randint(self.min_field, self.max_field, size=num_darts, dtype=np.int32)
         for i in range(self.kind):
             if i+1 == num_darts:
                 break
@@ -31,7 +34,7 @@ class Player:
                 angle_max = 2*np.pi
             else:
                 sector_size = (2*np.pi) / 20
-                angle_min = (target_field % 20) * sector_size
+                angle_min = (target_field % 20) * sector_size + sector_size/2
                 angle_max = angle_min + sector_size
             target_angle = angle_min + np.random.rand() * (angle_max - angle_min)
             if target_field < 20:
