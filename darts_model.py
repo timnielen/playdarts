@@ -106,16 +106,16 @@ class PositionEmbeddingSine(nn.Module):
 class CNNTransformer(nn.Module):
     def __init__(self, d, num_queries=NUM_QUERIES, num_encoder_layers=0, num_decoder_layers=6, dim_feedforward=2048):
         super().__init__()
-        name="resnet50"
+        name="resnet101"
         resnet = getattr(models, name)(
             replace_stride_with_dilation=[False, False, False],
             pretrained=True, norm_layer=FrozenBatchNorm2d)
         num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
         
         train_backbone = True
-        for name, parameter in resnet.named_parameters():
-            if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
-                parameter.requires_grad_(False)
+        # for name, parameter in resnet.named_parameters():
+        #     if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
+        #         parameter.requires_grad_(False)
                 
         return_interm_layers = False        
         if return_interm_layers:
@@ -156,7 +156,7 @@ class CNNTransformer(nn.Module):
         # self.conv2 = nn.Conv2d(2*d,4*d, kernel_size=5, stride=3, padding=2)
         # self.bn2 = nn.BatchNorm2d(4*d)
         # self.relu = nn.ReLU()
-        self.num_darts_embed = MLP(d*100, dim_feedforward, 4, num_layers)
+        self.num_darts_pred = MLP(d*16*16, dim_feedforward, 4, num_layers)
 
     def forward(self, x):
         B, C, H, W = x.shape  # Input: (B, 3, H, W)
@@ -167,7 +167,7 @@ class CNNTransformer(nn.Module):
         x = self.conv1x1(x)   # Shape: (B, d, H/32, W/32)
         extracted_features = x.clone()
         
-        num_darts = self.num_darts_embed(x.flatten(1))
+        num_darts = self.num_darts_pred(x.flatten(1))
         
         pos = self.positional_encoding(x)
 
