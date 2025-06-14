@@ -10,7 +10,8 @@ import numpy as np
 
 colors = ["purple", "red", "orange", "yellow", "green"]
 markersize = 20
-def annotate_images(directory):
+def annotate_images(directory, start_index=None):
+    print(start_index)
     output_path = os.path.join(directory, "labels.pkl")
 
     if os.path.exists(output_path):
@@ -21,7 +22,10 @@ def annotate_images(directory):
     image_paths = sorted(glob.glob(os.path.join(directory, "*.[pjJP][pnNP]*[gG]")))
 
     coords = []
-    for image_path in image_paths:
+    
+    for index, image_path in enumerate(image_paths):
+        if start_index is not None and index < start_index:
+            continue
         filename = os.path.basename(image_path)
 
         image = Image.open(image_path)
@@ -169,9 +173,10 @@ def annotate_images(directory):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Image annotation tool")
     parser.add_argument("directory", type=str, help="Path to image directory")
+    parser.add_argument("--start_index", type=int, help="Start index", default=None, required=False)
     args = parser.parse_args()
 
     if not os.path.isdir(args.directory):
         print(f"Error: '{args.directory}' is not a valid directory.")
     else:
-        annotate_images(args.directory)
+        annotate_images(args.directory, start_index=args.start_index)

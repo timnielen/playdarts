@@ -1,5 +1,5 @@
 from transformers import DetrForObjectDetection, DetrConfig, DetrImageProcessor, Trainer, TrainingArguments
-from torch.utils.data import random_split
+from torch.utils.data import random_split, ChainDataset
 from dataset import DartsDataset
 from torchvision import transforms
 from PIL import Image, ImageDraw
@@ -11,16 +11,20 @@ image_processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50", 
 
 def collate_fn(batch):
     images, targets = zip(*batch)
-    inputs = image_processor(images=images, annotations=targets, return_tensors="pt")
+    inputs = image_processor(images=images, annotations=targets, return_tensors="pt", do_resize=False)
     return inputs
 
 if __name__ == "__main__":
-    dataset = DartsDataset(dirs=[f'3D/scene/rendered/imgs_{i}' for i in range(6)])
+    dirs = [f'3D/scene/rendered/imgs_{i}' for i in range(6)]# + 
+    dataset = DartsDataset(dirs=dirs, random_rescale=True, random_rotation=True)
+    real_dataset = DartsDataset(dirs=[f'my_unlabelled/vids/frames_000{i}' for i in range(8)], random_rescale=False, random_rotation=False, resize_to=768)
+    
     train_size = int(0.8 * len(dataset))
     test_size = len(dataset) - train_size
 
     generator = torch.Generator().manual_seed(42)
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size], generator=generator)
+    
     
     print("train/test split:", len(train_dataset), len(test_dataset))
     
@@ -48,10 +52,10 @@ if __name__ == "__main__":
     )
 
     training_args = TrainingArguments(
-        output_dir="finetuned",
-        per_device_train_batch_size=16,
-        per_device_eval_batch_size=16,
-        gradient_accumulation_steps=2,
+        output_dir="multi_res_scratch",
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
+        gradient_accumulation_steps=4,
         num_train_epochs=30,
         # bf16=True,
         max_grad_norm=.5,
@@ -61,8 +65,10 @@ if __name__ == "__main__":
         learning_rate=1e-4,
         save_total_limit=5,
         remove_unused_columns=False,
-        dataloader_num_workers = 4,
-        dataloader_persistent_workers = True,
+        dataloader_num_workers = 2,
+        dataloader_persistent_workers = False,
+        lr_scheduler_type="cosine",
+        metric_for_best_model="eval_test_loss", 
         # torch_compile = True,
         # torch_compile_backend = "inductor",
         load_best_model_at_end=True,
@@ -72,7 +78,8 @@ if __name__ == "__main__":
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=test_dataset,
+        eval_dataset={"test": test_dataset, "real": real_dataset},
         data_collator=collate_fn,
     )
-    trainer.train(resume_from_checkpoint=True)
+    # trainer.train(resume_from_checkpoint=True)
+    trainer.train()
