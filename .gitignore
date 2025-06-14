@@ -79,3 +79,9 @@ secrets.json
 
 3D/scene
 backup
+
+only_synthetic
+multi_res
+finetuned
+multires_scratch
+wandb
