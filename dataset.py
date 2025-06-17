@@ -8,7 +8,7 @@ import random
 import numpy as np
 
 class DartsDataset(Dataset):
-    def __init__(self, dirs, bbox_size=13, random_rotation=True, random_rescale=True, resize_to=None):
+    def __init__(self, dirs, bbox_size=13, random_rotation=True, random_rescale=True, resize_to=None, return_reference=False, is_synthetic=True):
         """
         Args:
             root_dir (str): Root directory containing image folders.
@@ -24,6 +24,8 @@ class DartsDataset(Dataset):
         self.random_rotation = random_rotation
         self.random_rescale = random_rescale
         self.resize_to = resize_to
+        self.return_reference = return_reference
+        self.is_synthetic = is_synthetic
 
     def __len__(self):
         return len(self.labels)
@@ -67,8 +69,11 @@ class DartsDataset(Dataset):
             
         # 3. Random Rescale
         if self.random_rescale:
-            scale_factor = random.uniform(0.625, 1)
-            new_size = (int(width * scale_factor), int(height * scale_factor))
+            resize_to = np.random.choice([480, 512, 544, 576, 608, 640, 672, 704, 736, 768])
+            if width > height:
+                new_size = (resize_to, int(height * resize_to / width))
+            else:
+                new_size = (int(width * resize_to / height), resize_to)
             image = image.resize(new_size, Image.BILINEAR)
             pixel_coords *= torch.tensor([new_size[0] / width, new_size[1] / height])
             width, height = image.size
@@ -93,4 +98,15 @@ class DartsDataset(Dataset):
             "annotations": annotations,
             "filename": filename,
         }
-        return image, targets
+        if not self.return_reference:
+            return image, targets
+        
+        if self.is_synthetic:
+            reference_filename = self.labels.iloc[idx - (idx%4)]['filename']
+            reference = Image.open(reference_filename)
+            
+        if self.random_rotation:
+            angle += random.uniform(-5, 5)
+            reference = TF.rotate(reference, angle)
+            
+        return image, targets, reference
