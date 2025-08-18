@@ -22,9 +22,9 @@ ENV/
 # Data files (add more specific image or data file types if needed)
 data/
 dataset/
-*.png
-*.jpg
-*.jpeg
+# *.png
+# *.jpg
+# *.jpeg
 *.ARW
 *.csv
 *.gif
@@ -76,9 +76,11 @@ config.yaml
 config.json
 secrets.json
 
-
-3D/scene
+old
 backup
+3D/scene/rendered
+my_unlabelled
+thommy
 
 only_synthetic
 multi_res

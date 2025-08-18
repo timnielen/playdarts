@@ -4,20 +4,25 @@ from dataset import DartsDataset
 from torchvision import transforms
 from PIL import Image, ImageDraw
 import torch
+from util import prepare_6_channel, CustomDetrImageProcessor
 from torchvision.datasets import CocoDetection
 
 
-image_processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50", size={"shortest_edge": 768, "longest_edge": 768}) 
+image_processor = CustomDetrImageProcessor(size={"shortest_edge": 768, "longest_edge": 768}) 
 
 def collate_fn(batch):
-    images, targets = zip(*batch)
-    inputs = image_processor(images=images, annotations=targets, return_tensors="pt", do_resize=False)
+    # images, targets, references = zip(*batch)
+    images, targets, tfm_images, tfm_targets = zip(*batch)
+    inputs = image_processor(images=images+tfm_images, annotations=targets+tfm_targets, return_tensors="pt", do_resize=False)
+    # reference_inputs = image_processor(images=references, return_tensors="pt", do_resize=False)
+    # inputs["pixel_values"] = torch.cat([inputs["pixel_values"], tfm_inputs["pixel_values"]], dim=1)
+    # inputs["labels"] = inputs["labels"]+tfm_inputs["labels"]
     return inputs
 
 if __name__ == "__main__":
-    dirs = [f'3D/scene/rendered/imgs_{i}' for i in range(8)]# + 
-    dataset = DartsDataset(dirs=dirs, random_rescale=False, random_rotation=True)
-    real_dataset = DartsDataset(dirs=[f'my_unlabelled/vids/frames_000{i}' for i in range(8)], random_rescale=False, random_rotation=False, resize_to=768)
+    dirs = [f'3D/scene/rendered/imgs_{i}' for i in range(8)]
+    dataset = DartsDataset(dirs=dirs, random_rescale=True, random_rotation=True, is_synthetic=True)
+    real_dataset = DartsDataset(dirs=[f'my_unlabelled/vids/frames_000{i}' for i in range(8)], random_rescale=False, random_rotation=False, resize_to=768, is_synthetic=False)
     
     train_size = int(0.8 * len(dataset))
     test_size = len(dataset) - train_size
@@ -49,15 +54,18 @@ if __name__ == "__main__":
         ignore_mismatched_sizes=True,
         id2label=id2label,
         label2id=label2id,
+        num_channels=6,  # Use 6 channels for the model
     )
+    
+    # prepare_6_channel(model)
 
     training_args = TrainingArguments(
-        output_dir="single_res_32k",
-        per_device_train_batch_size=16,
+        output_dir="center_scale",
+        per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
         gradient_accumulation_steps=2,
-        num_train_epochs=30,
-        bf16=True,
+        num_train_epochs=20,
+        # bf16=True,
         max_grad_norm=.5,
         eval_strategy ="steps",
         eval_steps=400,
@@ -69,6 +77,7 @@ if __name__ == "__main__":
         remove_unused_columns=False,
         dataloader_num_workers = 2,
         dataloader_persistent_workers = False,
+        # dataloader_prefetch_factor=2,
         lr_scheduler_type="cosine",
         metric_for_best_model="eval_test_loss", 
         # torch_compile = True,
