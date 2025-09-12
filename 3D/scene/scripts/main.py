@@ -81,19 +81,21 @@ def randomize_dart(num_dart, target, scale, range_depth = (0.05, 0.15), target_c
     rotation = direction.to_track_quat('Z').to_euler()
     depth = np.random.uniform(*range_depth)
     
+    shaft_location = location + (dart_lengths[num_dart-1] - depth) * direction
+    
     for obj in collection.objects:
         print(obj.name)
         instance = bpy.data.objects.new(name=f"tmp_{obj.name}", object_data=obj.data)
         instance.location = location - depth * direction
         instance.rotation_euler = rotation
         target_collection.objects.link(instance)
-        if color is not None and obj.name in ["Shaft4", "Flight4"]:
+        if color is not None and obj.name in ["Shaft4", "Flight4", "Flight5"]:
             mat = instance.data.materials[0]
             assert mat.use_nodes == True
             bsdf = mat.node_tree.nodes.get("Principled BSDF")
             bsdf.inputs["Base Color"].default_value = tuple(color)
         
-    return location, direction
+    return location, direction, shaft_location
 
 board_radii = [
     {
@@ -125,14 +127,15 @@ print(bpy.context.preferences.addons['cycles'].preferences)
     
 
 num_scenes = 1000
-num_board = 2
+num_board = 1
 index = 0
-directory = "rendered/imgs_0/"
+base_directory = "rendered_dual"
+directory = f"{base_directory}/imgs_0/"
 if not os.path.isdir("rendered"):
     os.mkdir("rendered")
 while os.path.isdir(directory):
     index += 1
-    directory = f"rendered/imgs_{index}/"
+    directory = f"{base_directory}/imgs_{index}/"
 #full_path = os.path.join(os.getcwd(), directory)
 #print(os.getcwd())
 os.mkdir(directory)
@@ -146,14 +149,16 @@ for i in range(4):
     
 print ("Updated directory:" , os.getcwd())
 df_data = []
-num_dart_models = 4
+num_dart_models = 6
+dart_lengths = [1.40653, 1.45751, 1.40653, 1.45751, 1.45751, 1.45751]
 for num_scene in range(num_scenes):
     clean_scene()
     randomize_camera(radius=.3, range_angle=np.radians(45), range_distance=(4,20), range_lens=(np.random.uniform(4,6), np.random.uniform(25,34)))
     randomize_board(num_board)
     
     my_locations = [world_to_camera_view(scene, cam, location )[:2] for location in locations]
-        
+    my_shaft_locations = []
+
     num_dart = np.random.randint(1, num_dart_models+1)
     scale = np.random.uniform(0.05, 0.2)
     
@@ -166,8 +171,10 @@ for num_scene in range(num_scenes):
     previous_direction = None
     for num_darts in range(4):
         if num_darts > 0:
-            dart_loc, previous_direction = randomize_dart(num_dart, center_field(target, num_board), scale, color=color, previous_direction=previous_direction)
+            dart_loc, previous_direction, shaft_loc = randomize_dart(num_dart, center_field(target, num_board), scale, color=color, previous_direction=previous_direction)
             my_locations.append(world_to_camera_view(scene, cam, dart_loc)[:2])
+            my_shaft_locations.append(world_to_camera_view(scene, cam, shaft_loc)[:2])
+            
             if np.random.rand() < .5: #in 50% of cases target a different field next
                 target = np.random.randint(len(fields))
         else:
@@ -176,8 +183,8 @@ for num_scene in range(num_scenes):
         filename = str(uuid4())
         bpy.context.scene.render.filepath = "//" + directory + filename
         bpy.ops.render.render(write_still=True)
-        
-        df_data.append({"filename": filename + ".jpg", "locations": np.array(my_locations), "num_darts": num_darts})
+
+        df_data.append({"filename": filename + ".jpg", "locations": np.array(my_locations), "shaft_locations": np.array(my_shaft_locations), "num_darts": num_darts})
         pd.DataFrame(data=df_data).to_pickle(directory + "labels.pkl")
 
 

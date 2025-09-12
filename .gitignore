@@ -30,7 +30,7 @@ dataset/
 *.gif
 *.bmp
 *.tiff
-*.webp
+# *.webp
 *.ico
 *.svg
 *.raw
@@ -78,7 +78,7 @@ secrets.json
 
 old
 backup
-3D/scene/rendered
+3D/scene/rendered*
 my_unlabelled
 thommy
 
