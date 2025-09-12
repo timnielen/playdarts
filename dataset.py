@@ -70,7 +70,7 @@ class DartsDataset(Dataset):
         
         boxes = torch.cat((coords-bbox_size, torch.ones_like(coords)*bbox_width), dim=1)
         labels = torch.cat((torch.arange(4, dtype=torch.long), torch.ones(coords.shape[0]-4, dtype=torch.long)*4))
-        annotations = [{"bbox": boxes[i], "category_id": labels[i], "area": bbox_width * bbox_width} for i in range(boxes.shape[0])]
+        annotations = [{"bbox": boxes[i], "category_id": labels[i], "area": bbox_width[0] * bbox_width[1]} for i in range(boxes.shape[0])]
         targets = {
             "annotations": annotations,
             "image_id": id,
@@ -80,7 +80,7 @@ class DartsDataset(Dataset):
     def __getitem__(self, idx):
         filename, locations, num_darts = self.labels.iloc[idx][['filename', 'locations', 'num_darts']]
         image = Image.open(filename)
-        
+
         locations = torch.tensor(locations, dtype=torch.float32)
         locations[:, 1] = 1 - locations[:, 1]  # Convert y-coordinates to match image coordinates (0 at top)
         pixel_coords = locations * torch.tensor(image.size)  # Convert to pixel coordinates
@@ -107,4 +107,4 @@ class DartsDataset(Dataset):
         # Update pixel coordinates after resizing
         
             
-        return *self.get_annotations(image, pixel_coords, id=2*idx), *self.get_annotations(transformed_image, transformed_coords, id=2*idx+1)
+        return filename, *self.get_annotations(image, pixel_coords, id=2*idx), *self.get_annotations(transformed_image, transformed_coords, id=2*idx+1)
