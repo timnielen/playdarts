@@ -88,4 +88,4 @@ finetuned
 multires_scratch
 wandb
 
-dataset
+dataset*

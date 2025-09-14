@@ -77,14 +77,41 @@ class DartsDataset(Dataset):
         }
         return image, targets
 
+    def get_annotations_dual(self, image, coords, id, num_darts):
+        coords = coords.round()
+        
+        # rescale bbox size according to the size of the image: 768px -> 13px bbox size    
+        bbox_size = self.bbox_size * (max(image.size) / 768) 
+        
+        # rescale boxes according to the size of the dartboard in the image
+        d = np.array([(coords[0, 0] - coords[2, 0]) / image.width, (coords[3, 1] - coords[1, 1]) / image.height])
+        bbox_size *= d
+        
+        bbox_width = bbox_size * 2
+        
+        boxes = torch.cat((coords-bbox_size, torch.ones_like(coords)*bbox_width), dim=1)
+        corners, tip_boxes, shaft_boxes = boxes.split([4, num_darts, num_darts], dim=0)
+        dual_boxes = torch.cat((tip_boxes, shaft_boxes), dim=1)
+        dual_corners = corners.repeat(1, 2)
+        boxes = torch.cat((dual_corners, dual_boxes), dim=0)
+        labels = torch.cat((torch.arange(4, dtype=torch.long), torch.ones(coords.shape[0]-4, dtype=torch.long)*4))
+        annotations = [{"bbox": boxes[i], "category_id": labels[i], "area": bbox_width[0] * bbox_width[1]} for i in range(boxes.shape[0])]
+        targets = {
+            "annotations": annotations,
+            "image_id": id,
+        }
+        return image, targets
+
     def __getitem__(self, idx):
-        filename, locations, num_darts = self.labels.iloc[idx][['filename', 'locations', 'num_darts']]
+        filename, locations, shaft_locations, corners, num_darts = self.labels.iloc[idx][['filename', 'locations', 'shaft_locations', 'corners', 'num_darts']]
         image = Image.open(filename)
 
-        locations = torch.tensor(locations, dtype=torch.float32)
+        if num_darts == 0:
+            locations = torch.tensor(corners, dtype=torch.float32)
+        else:
+            locations = torch.from_numpy(np.concatenate([corners, locations, shaft_locations], axis=0, dtype=np.float32))
         locations[:, 1] = 1 - locations[:, 1]  # Convert y-coordinates to match image coordinates (0 at top)
         pixel_coords = locations * torch.tensor(image.size)  # Convert to pixel coordinates
-        
         # 1. Random Rotation
         if self.random_rotation:
             angle = random.uniform(-10, 10)
@@ -104,7 +131,5 @@ class DartsDataset(Dataset):
         
         transformed_image, transformed_coords = self.transform(image, pixel_coords, size=768)
         
-        # Update pixel coordinates after resizing
         
-            
-        return filename, *self.get_annotations(image, pixel_coords, id=2*idx), *self.get_annotations(transformed_image, transformed_coords, id=2*idx+1)
+        return filename, *self.get_annotations_dual(image, pixel_coords, id=2*idx, num_darts=num_darts), *self.get_annotations_dual(transformed_image, transformed_coords, id=2*idx+1, num_darts=num_darts)
