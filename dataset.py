@@ -69,7 +69,7 @@ class DartsDataset(Dataset):
         bbox_width = bbox_size * 2
         
         boxes = torch.cat((coords-bbox_size, torch.ones_like(coords)*bbox_width), dim=1)
-        labels = torch.cat((torch.arange(4, dtype=torch.long), torch.ones(coords.shape[0]-4, dtype=torch.long)*4))
+        labels = torch.cat((torch.arange(1, 5, dtype=torch.long), torch.ones(coords.shape[0]-4, dtype=torch.long)*5))
         annotations = [{"bbox": boxes[i], "category_id": labels[i], "area": bbox_width[0] * bbox_width[1]} for i in range(boxes.shape[0])]
         targets = {
             "annotations": annotations,
@@ -90,11 +90,11 @@ class DartsDataset(Dataset):
         bbox_width = bbox_size * 2
         
         boxes = torch.cat((coords-bbox_size, torch.ones_like(coords)*bbox_width), dim=1)
-        corners, tip_boxes, shaft_boxes = boxes.split([4, num_darts, num_darts], dim=0)
+        left_corners, right_corners, tip_boxes, shaft_boxes = boxes.split([4, 4, num_darts, num_darts], dim=0)
         dual_boxes = torch.cat((tip_boxes, shaft_boxes), dim=1)
-        dual_corners = corners.repeat(1, 2)
+        dual_corners = torch.cat((left_corners, right_corners), dim=1)
         boxes = torch.cat((dual_corners, dual_boxes), dim=0)
-        labels = torch.cat((torch.arange(4, dtype=torch.long), torch.ones(coords.shape[0]-4, dtype=torch.long)*4))
+        labels = torch.cat((torch.arange(1, 5, dtype=torch.long), torch.ones(num_darts, dtype=torch.long)*5))
         annotations = [{"bbox": boxes[i], "category_id": labels[i], "area": bbox_width[0] * bbox_width[1]} for i in range(boxes.shape[0])]
         targets = {
             "annotations": annotations,
@@ -103,13 +103,13 @@ class DartsDataset(Dataset):
         return image, targets
 
     def __getitem__(self, idx):
-        filename, locations, shaft_locations, corners, num_darts = self.labels.iloc[idx][['filename', 'locations', 'shaft_locations', 'corners', 'num_darts']]
+        filename, locations, shaft_locations, left_corners, right_corners, num_darts = self.labels.iloc[idx][['filename', 'locations', 'shaft_locations', 'left_corners', 'right_corners', 'num_darts']]
         image = Image.open(filename)
 
         if num_darts == 0:
-            locations = torch.tensor(corners, dtype=torch.float32)
+            locations = torch.from_numpy(np.concatenate([left_corners, right_corners], axis=0, dtype=np.float32))
         else:
-            locations = torch.from_numpy(np.concatenate([corners, locations, shaft_locations], axis=0, dtype=np.float32))
+            locations = torch.from_numpy(np.concatenate([left_corners, right_corners, locations, shaft_locations], axis=0, dtype=np.float32))
         locations[:, 1] = 1 - locations[:, 1]  # Convert y-coordinates to match image coordinates (0 at top)
         pixel_coords = locations * torch.tensor(image.size)  # Convert to pixel coordinates
         # 1. Random Rotation
